@@ -1,5 +1,5 @@
 import os
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import pandas as pd
@@ -9,14 +9,15 @@ from catboost import CatBoostRegressor
 
 app = FastAPI()
 
+# UPDATE THIS URL TO YOUR ACTUAL VERCEL URL
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], 
+    allow_origins=["https://your-app.vercel.app"], 
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# 1. ELEMENTAL DATA (Required for Physics Features)
+# 1. ELEMENTAL DATA
 elements_data = {
     'H': [1.00, 2.20], 'Li': [6.94, 0.98], 'C': [12.01, 2.55], 'N': [14.01, 3.04],
     'O': [16.00, 3.44], 'F': [19.00, 3.98], 'Mg': [24.31, 1.31], 'Al': [26.98, 1.61],
@@ -40,11 +41,14 @@ def extract_features(formula):
     if not ens: return 50.0, 2.0, 0.0, 0.0
     return np.mean(w), np.mean(ens), np.max(ens) - np.min(ens), np.std(ens)
 
-# 2. LOAD 4 PRECISION MODELS
+# 2. LOAD MODELS
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 models = [CatBoostRegressor() for _ in range(4)]
-for i in range(4):
-    models[i].load_model(os.path.join(BASE_DIR, f"model_v3_{i}.cbm"))
+try:
+    for i in range(4):
+        models[i].load_model(os.path.join(BASE_DIR, f"model_v3_{i}.cbm"))
+except Exception as e:
+    print(f"Error loading models: {e}")
 
 class NanoInput(BaseModel):
     formula: str
@@ -55,30 +59,33 @@ class NanoInput(BaseModel):
 
 @app.post("/predict")
 def predict(data: NanoInput):
-    # Map to DataFrame
-    input_df = pd.DataFrame([data.dict()])
-    
-    # Feature Engineering (Must match Training Script exactly)
-    w, ens, en_diff, en_std = extract_features(input_df['formula'][0])
-    input_df['avg_w'], input_df['avg_en'] = w, ens
-    input_df['en_diff'], input_df['en_std'] = en_diff, en_std
-    input_df['inv_size'] = 1.0 / (input_df['size_nm'] + 1e-5)
-    
-    # Define columns to match training order
-    model_features = ['avg_w', 'avg_en', 'en_diff', 'en_std', 'crystal_structure', 'material_class', 'size_nm', 'inv_size', 'shape']
-    X = input_df[model_features].copy()
-    
-    # Cast categories to string to avoid 2.0 error
-    cat_cols = ['crystal_structure', 'material_class', 'shape']
-    for col in cat_cols:
-        X[col] = X[col].astype(str)
+    try:
+        # Calculate features based on formula string
+        w, avg_en, en_diff, en_std = extract_features(data.formula)
         
-    # Get predictions from all 4 models
-    preds = [model.predict(X)[0] for model in models]
-    
-    return {
-        "bandgap": f"{preds[0]:.2f} eV",
-        "density": f"{preds[1]:.2f} g/cm³",
-        "formation_energy": f"{preds[2]:.2f} eV/atom",
-        "specific_heat": f"{preds[3]:.4f} J/gK"
-    }
+        # Create dictionary matching exactly the training features order
+        input_dict = {
+            'avg_w': w,
+            'avg_en': avg_en,
+            'en_diff': en_diff,
+            'en_std': en_std,
+            'crystal_structure': str(data.crystal_structure),
+            'material_class': str(data.material_class),
+            'size_nm': float(data.size_nm),
+            'inv_size': 1.0 / (float(data.size_nm) + 1e-5),
+            'shape': str(data.shape)
+        }
+        
+        X = pd.DataFrame([input_dict])
+        
+        # Predict
+        preds = [model.predict(X)[0] for model in models]
+        
+        return {
+            "bandgap": f"{preds[0]:.2f} eV",
+            "density": f"{preds[1]:.2f} g/cm³",
+            "formation_energy": f"{preds[2]:.2f} eV/atom",
+            "specific_heat": f"{preds[3]:.4f} J/gK"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
