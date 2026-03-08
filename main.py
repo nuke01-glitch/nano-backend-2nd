@@ -6,6 +6,7 @@ import pandas as pd
 import numpy as np
 import re
 from catboost import CatBoostRegressor
+from typing import Optional
 
 app = FastAPI()
 
@@ -54,10 +55,10 @@ except Exception as e:
 
 class NanoInput(BaseModel):
     formula: str
-    size_nm: float
-    crystal_structure: str
-    material_class: str
-    shape: str
+    size_nm: Optional[float] = 0.0  # Use Optional to handle missing data
+    crystal_structure: Optional[str] = "Unknown"
+    material_class: Optional[str] = "Unknown"
+    shape: Optional[str] = "Unknown"
 
 @app.post("/predict")
 def predict(data: NanoInput):
