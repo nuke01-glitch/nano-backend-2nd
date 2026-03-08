@@ -12,7 +12,9 @@ app = FastAPI()
 # UPDATE THIS URL TO YOUR ACTUAL VERCEL URL
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://your-app.vercel.app"], 
+    # Use the exact URL of your Vercel app (no trailing slash)
+    allow_origins=["https://nano-frontend-2nd-9ywb.vercel.app"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
